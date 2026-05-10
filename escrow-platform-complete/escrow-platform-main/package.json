@@ -1,0 +1,16 @@
+{
+  "name": "escrow-platform",
+  "version": "1.0.0",
+  "description": "Full-stack escrow platform for IndiaMART-style transactions",
+  "private": true,
+  "scripts": {
+    "install-all": "npm install && cd server && npm install && cd ../client && npm install",
+    "dev": "concurrently \"cd server && npm run dev\" \"cd client && npm start\"",
+    "test": "cd server && npm test",
+    "build": "cd client && npm run build && cd ../server && npm run build",
+    "start": "cd server && npm start"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

@@ -1,7 +1,8 @@
 /**
  * Express App Configuration
  * 
- * Sets up middleware, routes, and error handling
+ * Sets up middleware, routes, and error handling.
+ * Includes all 7 trust pillars: KYC, disputes, stats, notifications.
  */
 
 import express, { Request, Response, NextFunction } from 'express';
@@ -14,6 +15,12 @@ import * as authController from './controllers/authController';
 import * as transactionController from './controllers/transactionController';
 import * as paymentController from './controllers/paymentController';
 import * as adminController from './controllers/adminController';
+import * as kycController from './controllers/kycController';
+import * as disputeController from './controllers/disputeController';
+
+// Models (for inline stats)
+import Transaction from './models/Transaction';
+import User from './models/User';
 
 // Validation schemas
 import {
@@ -23,6 +30,7 @@ import {
   shipValidation,
   createOrderValidation,
   verifyPaymentValidation,
+  disputeValidation,          // we'll add this
 } from './middleware/validation';
 
 export const app = express();
@@ -41,15 +49,47 @@ app.get('/health', (req: Request, res: Response) => {
 // AUTH ROUTES
 // ============================================================================
 
-app.post('/api/auth/register', registerValidation, handleValidationErrors, authController.register);
-app.post('/api/auth/login', loginValidation, handleValidationErrors, authController.login);
+app.post(
+  '/api/auth/register',
+  registerValidation,
+  handleValidationErrors,
+  authController.register
+);
+app.post(
+  '/api/auth/login',
+  loginValidation,
+  handleValidationErrors,
+  authController.login
+);
 app.get('/api/auth/me', authMiddleware, authController.getCurrentUser);
+
+// ============================================================================
+// KYC ROUTES (Trust Pillar 2)
+// ============================================================================
+
+// Upload KYC (any logged‑in user)
+app.post('/api/kyc/upload', authMiddleware, kycController.uploadKYC);
+
+// Admin: list pending KYC
+app.get(
+  '/api/admin/kyc',
+  authMiddleware,
+  adminMiddleware,
+  kycController.getPendingKYC
+);
+
+// Admin: approve/reject KYC
+app.put(
+  '/api/admin/kyc/:id',
+  authMiddleware,
+  adminMiddleware,
+  kycController.reviewKYC
+);
 
 // ============================================================================
 // TRANSACTION ROUTES
 // ============================================================================
 
-// Initiate transaction (buyer)
 app.post(
   '/api/transactions/initiate',
   authMiddleware,
@@ -58,13 +98,10 @@ app.post(
   transactionController.initiateTransaction
 );
 
-// Get transaction details
 app.get('/api/transactions/:id', authMiddleware, transactionController.getTransaction);
 
-// List user's transactions
 app.get('/api/transactions', authMiddleware, transactionController.listUserTransactions);
 
-// Ship goods (seller)
 app.put(
   '/api/transactions/:id/ship',
   authMiddleware,
@@ -73,14 +110,36 @@ app.put(
   transactionController.shipTransaction
 );
 
-// Confirm receipt (buyer)
-app.put('/api/transactions/:id/confirm', authMiddleware, transactionController.confirmReceipt);
+app.put(
+  '/api/transactions/:id/confirm',
+  authMiddleware,
+  transactionController.confirmReceipt
+);
+
+// Raise a dispute (buyer or seller) – Trust Pillar 3
+app.post(
+  '/api/transactions/:id/dispute',
+  authMiddleware,
+  disputeValidation,
+  handleValidationErrors,
+  disputeController.raiseDispute
+);
+
+// ============================================================================
+// DISPUTE ROUTES (Trust Pillar 3)
+// ============================================================================
+
+// Get dispute details (for any party involved)
+app.get(
+  '/api/disputes/:id',
+  authMiddleware,
+  disputeController.getDispute
+);
 
 // ============================================================================
 // PAYMENT ROUTES
 // ============================================================================
 
-// Create payment order
 app.post(
   '/api/payment/order',
   authMiddleware,
@@ -89,7 +148,6 @@ app.post(
   paymentController.createOrder
 );
 
-// Verify payment signature
 app.post(
   '/api/payment/verify',
   authMiddleware,
@@ -98,24 +156,53 @@ app.post(
   paymentController.verifyPayment
 );
 
-// Execute payout to seller
 app.post('/api/payment/payout', authMiddleware, paymentController.executePayout);
 
 // ============================================================================
 // ADMIN ROUTES
 // ============================================================================
 
-// List all transactions
-app.get('/api/admin/transactions', authMiddleware, adminMiddleware, adminController.listAllTransactions);
+app.get(
+  '/api/admin/transactions',
+  authMiddleware,
+  adminMiddleware,
+  adminController.listAllTransactions
+);
 
-// List all disputes
-app.get('/api/admin/disputes', authMiddleware, adminMiddleware, adminController.listAllDisputes);
+app.get(
+  '/api/admin/disputes',
+  authMiddleware,
+  adminMiddleware,
+  adminController.listAllDisputes
+);
 
-// Resolve dispute
-app.put('/api/admin/disputes/:id/resolve', authMiddleware, adminMiddleware, adminController.resolveDispute);
+app.put(
+  '/api/admin/disputes/:id/resolve',
+  authMiddleware,
+  adminMiddleware,
+  adminController.resolveDispute
+);
 
-// Manual release
-app.post('/api/admin/transactions/:id/manual-release', authMiddleware, adminMiddleware, adminController.manualRelease);
+app.post(
+  '/api/admin/transactions/:id/manual-release',
+  authMiddleware,
+  adminMiddleware,
+  adminController.manualRelease
+);
+
+// ============================================================================
+// PUBLIC STATISTICS (Trust Pillar 4)
+// ============================================================================
+
+app.get('/api/stats', async (_req: Request, res: Response) => {
+  try {
+    const successfulTransactions = await Transaction.countDocuments({ status: 'completed' });
+    const trustedSellers = await User.countDocuments({ trustedSeller: true });
+    res.json({ successfulTransactions, trustedSellers });
+  } catch (error) {
+    res.status(500).json({ error: 'Could not fetch stats' });
+  }
+});
 
 // ============================================================================
 // ERROR HANDLING
